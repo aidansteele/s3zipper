@@ -1,0 +1,76 @@
+Transform:
+  - AWS::Serverless-2016-10-31
+
+Parameters:
+  RealContentLength:
+    Type: String
+    Default: false
+    AllowedValues: [true, false]
+    Description: Whether the Lambda should report the real Content-Length (see README)
+  BucketName:
+    Type: String
+    Description: Name of S3 bucket to allow ZIP downloads from
+
+Resources:
+  GetObjectFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties: &getprops
+      AutoPublishAlias: live
+      MemorySize: 384
+      Timeout: 65
+      Tracing: Active
+      Architectures: [ arm64 ]
+      Runtime: provided.al2
+      Handler: GetObject
+      CodeUri: .
+      Environment:
+        Variables:
+          BUCKET: !Ref BucketName
+      Policies:
+        - AmazonS3ObjectLambdaExecutionRolePolicy
+        - S3ReadPolicy:
+            BucketName: !Ref BucketName
+
+  HeadObjectFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      <<: *getprops
+      Handler: HeadObject
+
+  ObjectLambdaAccessPoint:
+    Type: AWS::S3ObjectLambda::AccessPoint
+    Properties:
+      Name: !Ref AWS::StackName
+      ObjectLambdaConfiguration:
+        SupportingAccessPoint: !GetAtt SupportingAccessPoint.Arn
+        CloudWatchMetricsEnabled: true
+        TransformationConfigurations:
+          - Actions: [GetObject]
+            ContentTransformation:
+              AwsLambda:
+                FunctionArn: !Ref GetObjectFunction.Alias
+          - Actions: [HeadObject]
+            ContentTransformation:
+              AwsLambda:
+                FunctionArn: !Ref HeadObjectFunction.Alias
+
+  SupportingAccessPoint:
+    Type: AWS::S3::AccessPoint
+    Properties:
+      Bucket: !Ref BucketName
+
+Outputs:
+  GetObjectFunction:
+    Value: !Ref GetObjectFunction.Version
+  HeadObjectFunction:
+    Value: !Ref HeadObjectFunction.Version
+  ObjectLambdaAccessPoint:
+    Value: !Ref ObjectLambdaAccessPoint
+# The following doesn't appear to work. I think it's a bug
+# in the CFN resource definition
+#  Alias:
+#    Value: !GetAtt [ObjectLambdaAccessPoint, Alias.Value]
